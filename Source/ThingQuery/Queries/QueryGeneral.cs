@@ -249,9 +249,51 @@ namespace TD_Find_Lib
 		public override ThingDef IconDefFor(ThingDef o) => o;//duh
 	}
 
+	public abstract class ThingQueryDesignationDef : ThingQueryDropDown<DesignationDef>
+	{
+		private static readonly Lazy<Dictionary<DesignationDef, Designator>> designatorCache = new(() =>
+		{
+			Dictionary<DesignationDef, Designator> cache = [];
+			var reverseDesignators = Find.ReverseDesignatorDatabase.AllDesignators;
+			var resolvedDesignators = DefDatabase<DesignationCategoryDef>.AllDefs.SelectMany(category => category.ResolvedAllowedDesignators);
 
+			foreach (var designator in reverseDesignators.Concat(resolvedDesignators))
+			{
+				// Some designators don't have explicitly associated designation, we have to do some hardcoding.
+				var designation = designator.Designation ?? designator switch
+				{
+					Designator_ExtractSkull => DesignationDefOf.ExtractSkull,
+					Designator_ExtractTree => DesignationDefOf.ExtractTree,
+					Designator_Plan => DesignationDefOf.Plan,
+					Designator_ReleaseAnimalToWild => DesignationDefOf.ReleaseAnimalToWild,
+					Designator_RemovePaint => DesignationDefOf.RemovePaintBuilding,
+					Designator_RemoveFloorPaint => DesignationDefOf.RemovePaintFloor,
+					Designator_RemoveFoundation => DesignationDefOf.RemoveFoundation,
+					Designator_RemoveFloor => DesignationDefOf.RemoveFloor,
+					Designator_SmoothFloors => DesignationDefOf.SmoothFloor,
+					Designator_SmoothWalls => DesignationDefOf.SmoothWall,
+					_ => null
+				};
 
-	public class ThingQueryDesignation : ThingQueryDropDown<Designator>
+				if (designation != null)
+				{
+					cache.TryAdd(designation, designator);
+				}
+			}
+
+			return cache;
+		});
+
+		protected static Designator DesignatorFor(DesignationDef def) => def == null ? null : designatorCache.Value.GetValueOrDefault(def);
+
+		public override string NullOption() => "None".Translate();
+		public override bool Ordered => true;
+		public override string NameFor(DesignationDef def) => DesignatorFor(def)?.LabelCap ?? def.GetLabel();
+		public override Texture2D IconTexFor(DesignationDef o) => DesignatorFor(o)?.icon as Texture2D ?? ContentFinder<Texture2D>.Get(o.texturePath);
+		protected Designator Designator => DesignatorFor(sel);
+	}
+
+	public class ThingQueryDesignation : ThingQueryDesignationDef
 	{
 		public ThingQueryDesignation() => extraOption = 1;
 
@@ -265,33 +307,30 @@ namespace TD_Find_Lib
 				return thing.MapHeld.designationManager.DesignationOn(thing) == null
 					&& !thing.MapHeld.designationManager.AllDesignationsAt(thing.PositionHeld).Any();
 
-			return sel.Designation.targetType == TargetType.Thing ? thing.MapHeld.designationManager.DesignationOn(thing, sel.Designation) != null :
-				thing.MapHeld.designationManager.DesignationAt(thing.PositionHeld, sel.Designation) != null;
+			return sel.targetType == TargetType.Thing ? thing.MapHeld.designationManager.DesignationOn(thing, sel) != null :
+				thing.MapHeld.designationManager.DesignationAt(thing.PositionHeld, sel) != null;
 		}
-
-		public override IEnumerable<Designator> AllOptions() => Find.ReverseDesignatorDatabase.AllDesignators;
-		public override string NameFor(Designator o) => o?.Label;
-
-		public override string NullOption() => "None".Translate();
 
 		public override int ExtraOptionsCount => 1;
 		public override string NameForExtra(int ex) => "TD.AnyOption".Translate();
-
-		public override bool Ordered => true;
-
-		public override Texture2D IconTexFor(Designator o)
-		{
-			return o.icon as Texture2D;
-		}
 	}
 
-	public class ThingQueryCanDesignate : ThingQueryDropDown<Designator>
+	public class ThingQueryCanDesignate : ThingQueryDesignationDef
 	{
 		public override bool AppliesDirectlyTo(Thing thing)
 		{
+			var designator = Designator;
+
+			if (designator == null)
+			{
+				// There is no corresponding designator for the `Flick` designation, we use `CompFlickable` to do the
+				// check.
+				return sel == DesignationDefOf.Flick && thing.HasComp<CompFlickable>();
+			}
+
 			try
 			{
-				return sel?.CanDesignateThing(thing) == true;
+				return sel.targetType == TargetType.Thing ? designator.CanDesignateThing(thing) : designator.CanDesignateCell(thing.PositionHeld);
 			}
 			catch
 			{
@@ -299,13 +338,9 @@ namespace TD_Find_Lib
 			}
 		}
 
-		public override string NullOption() => "None".Translate();
-		public override IEnumerable<Designator> AllOptions() => Find.ReverseDesignatorDatabase.AllDesignators;
-		public override string NameFor(Designator o) => o?.Label;
-		public override bool Ordered => true;
-		public override Texture2D IconTexFor(Designator o)
+		public override IEnumerable<DesignationDef> AllOptions()
 		{
-			return o.icon as Texture2D;
+			return base.AllOptions().Where(def => DesignatorFor(def) != null || def == DesignationDefOf.Flick);
 		}
 	}
 
